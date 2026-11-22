@@ -1,0 +1,105 @@
+name: GH-200 Practice CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+# Exam trap: Prevents overlapping runs on the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Exam trap: Principle of least privilege for GITHUB_TOKEN
+permissions:
+  contents: read
+
+env:
+  APP_ENV: testing
+
+jobs:
+  # JOB 1: Matrix testing + Composite Action
+  test:
+    name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run custom composite action
+        id: sec_scan
+        uses: ./.github/actions/security-check
+        with:
+          target-file: "app.py"
+
+      - name: Print composite action output
+        run: echo "Security scan result was ${{ steps.sec_scan.outputs.scan-result }}"
+
+      - name: Run unit tests
+        run: python -m unittest discover
+
+  # JOB 2: Build & Upload Artifact (runs only if tests pass)
+  build:
+    name: Package Build Artifact
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create release bundle
+        run: |
+          mkdir -p dist
+          cp app.py dist/app.py
+          echo "Build SHA: ${{ github.sha }}" > dist/build-info.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-bundle
+          path: dist/
+          retention-days: 5
+
+  # JOB 3: Simulated Deployment with Environment Protection
+  deploy:
+    name: Deploy to ${{ github.event.inputs.deploy_env || 'staging' }}
+    needs: build
+    # Only deploy on push to main or manual trigger (skip on PRs)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploy_env || 'staging' }}
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-bundle
+          path: ./downloaded-dist
+
+      - name: Verify artifact and simulate deploy
+        run: |
+          cat ./downloaded-dist/build-info.txt
+          echo "Deploying to ${{ github.event.inputs.deploy_env || 'staging' }}..."
