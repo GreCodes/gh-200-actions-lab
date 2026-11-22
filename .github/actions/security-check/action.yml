@@ -1,1 +1,28 @@
+name: "Custom Security & Lint Check"
+description: "Runs a quick scan for hardcoded secrets and outputs status"
 
+inputs:
+  target-file:
+    description: "File to inspect"
+    required: true
+    default: "app.py"
+
+outputs:
+  scan-result:
+    description: "Result of the custom check"
+    value: ${{ steps.check.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Scan file for hardcoded tokens
+      id: check
+      shell: bash
+      run: |
+        echo "Scanning ${{ inputs.target-file }}..."
+        if grep -qi "ghp_" "${{ inputs.target-file }}"; then
+          echo "status=FAILED" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "status=PASSED" >> $GITHUB_OUTPUT
+        fi
